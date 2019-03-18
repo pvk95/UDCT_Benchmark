@@ -156,7 +156,7 @@ def create_model(input_shape):
     
     model = Model(inputs=[main_input], outputs = main_output)  
     # mean_absolute_error
-    #model.compile(loss=mae_loss, optimizer='sgd', metrics=['accuracy'])
+    model.compile(loss=mae_loss, optimizer='sgd', metrics=['accuracy'])
          
     return model
 
@@ -220,6 +220,8 @@ def getMarkersCells(labelPath, scale, size):
     return out
 
 def getCellCountCells(markers, x,y,h,w):
+    #Returns the no. of cells within a patch or a window
+    #For loop same no diff between outputs. 
     types = [0] * noutputs
     for i in range(noutputs):
         types[i] = (markers[y:y+h,x:x+w] == 1).sum()
@@ -228,8 +230,8 @@ def getCellCountCells(markers, x,y,h,w):
 
 def getLabelsCells(markers, img_pad, base_x, base_y, stride, scale):
     
-    height = int ((img_pad.shape[0])/args.stride)
-    width = int ((img_pad.shape[1])/args.stride)
+    height = int ((img_pad.shape[0])/stride)
+    width = int ((img_pad.shape[1])/stride)
     print("label size: ", height, width)
     labels = np.zeros((noutputs, height, width))
     if (args.kern == "sq"):
@@ -264,8 +266,8 @@ def getTrainingExampleCells(img_raw, framesize_w, framesize_h, labelPath, base_x
 import glob
 
 # prefix = '/Users/kkolyva/'
-prefix = '/home/milkyklim/'
-folder = prefix + 'dl-cell-counting/algorithm/data/test-cells'
+prefix = 'home/karthik/Desktop/ETH\ Sem\ 4/Semester\ Project/karthik_pattisapu/190311_count_ception/'
+folder = prefix + 'cells'
 img_ext = '.png'
 
 print('Full path:', folder)
@@ -273,6 +275,7 @@ print('Full path:', folder)
 imgs = []
 
 for filename in glob.iglob(folder + "/*dots" + img_ext):
+    print("filename")
     imgg = filename.replace("dots","cell")
     imgs.append([imgg,filename])
     
@@ -291,7 +294,7 @@ print(labelPath)
 im = imread(imgPath)
 img_raw_raw = im #grayscale
 
-img_raw = scipy.misc.imresize(img_raw_raw, (int(img_raw_raw.shape[0]/args.scale), int(img_raw_raw.shape[1]/args.scale)))
+img_raw = scipy.misc.imresize(img_raw_raw, (int(img_raw_raw.shape[0]/scale), int(img_raw_raw.shape[1]/scale)))
 print(img_raw_raw.shape," ->>>>", img_raw.shape)
 
 print("img_raw", img_raw.shape)
