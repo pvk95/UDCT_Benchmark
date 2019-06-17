@@ -15,8 +15,7 @@ import sys
 import argparse
 import time
 import pickle
-
-
+import gc
 
 #python cc_model_keras/count_ception_neurons.py -stride 1 -lr 0.005 -epochs 500 -exist True -patch_size 64
 # -folder 26_Mar -gpu 1  -obj 2 -train_model True -batch 5 -file_count count_maps_64_1
@@ -41,7 +40,7 @@ parser.add_argument('-gpu', type=str, nargs='?', help='GPU number',default='6')
 parser.add_argument('-obj', type=int, nargs='?', help='Object 1 or 2',default=1)
 parser.add_argument('-combine', type=bool, nargs='?', help='Combined model',default=False)
 parser.add_argument('-file_count', type=str, nargs='?', help='name of count file',default='count_maps')
-parser.add_argument('-frac_data_augment', type=float, nargs='?', help='fraction of data augmentation',default=0.5)
+parser.add_argument('-sz_tr', type=int, nargs='?', help='size of training data',default=100)
 
 args = parser.parse_args()
 
@@ -87,8 +86,7 @@ with open(save_path+'/log.txt','a+') as f:
     f.write("\nobj: "+str(args.obj))
     f.write("\ncombine: "+str(args.combine))
     f.write("\nfile_count: "+str(args.file_count))
-    f.write("\nfrac_data_augment: "+str(args.frac_data_augment))
-    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+    f.write("\nTraiming data size: "+str(args.sz_tr))
     f.write("\ntensorflow"+str(tf.__version__))
     f.write("\n====================>")
 
@@ -96,6 +94,8 @@ username   = "Karthik" # Adapt: Change this string to your username
 setproctitle.setproctitle(username)
 gpu_number = args.gpu   # Adapt: This is the GPU you are using. Possible values: 0 - 7
 cuda_environment["CUDA_VISIBLE_DEVICES"] = str(gpu_number)
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
 
 #####################################
 #Read the data and initialize some default args
@@ -168,32 +168,76 @@ n_samples=img_raw.shape[0]
 #####################################
 #Data augmentation
 
-with open(save_path+'/log.txt','a+') as f:
+n_test = 14
+idxs_test = np.arange(n_samples)[:n_test]
+if(args.sz_tr>n_samples-n_test):
+    raise Exception("Exceeding data size limits. Data augmentation for training disabled for now")
+
+idxs_train = np.random.choice(np.arange(n_test,n_samples),size=args.sz_tr,replace=False)
+#idxs_train = np.arange(n_samples)[n_test:n_test + int(args.sz_tr)]
+flip_rot = 0
+#Data augmentation for test set only
+
+with open(save_path + '/log.txt', 'a+') as f:
     f.write("\n====================>")
     f.write("\nData augmentation ===>")
+diff_len = 100 - n_test
 
-fraction_augment = args.frac_data_augment
 img_augment = []
 count_augment = []
-for i in range(np.int(n_samples*fraction_augment)):
+flip_augment =[]
+rot_augment =[]
+idxs_augment =[]
+sel = np.zeros(n_samples)
+while True:
     idx=np.random.choice(range(n_samples))
+    if(sel[idx]==1):
+        continue
     img_modify = img_raw[idx,:,:,:]
     count_modify = count[idx,:,:,:]
-    img_modify,count_modify = pre.genRandom(img=img_modify,countMap=count_modify)
+    img_modify,count_modify,flip,rot = pre.genRandom(img=img_modify,countMap=count_modify)
     if(img_modify is not None):
+        sel[idx] = 1
         img_augment.append(img_modify)
         count_augment.append(count_modify)
+        flip_augment.append(flip)
+        rot_augment.append(rot)
+        idxs_augment.append(idx)
+    if(len(img_augment)==diff_len):
+        break
+    if(np.all(sel==1)):
+        sel = np.zeros(n_samples)
 
 img_augment = np.stack(img_augment)
 count_augment = np.stack(count_augment)
+flip_augment = np.array(flip_augment)
+rot_augment = np.array(rot_augment)
+idxs_augment = np.array(idxs_augment)
+flip_rot = np.stack((idxs_augment,flip_augment,rot_augment),axis=-1)
 img_raw=np.concatenate((img_raw,img_augment),axis=0)
 count = np.concatenate((count,count_augment),axis=0)
 
-with open(save_path+'/log.txt','a+') as f:
-    f.write("\nNo. of samples after data augmentation: "+str(img_raw.shape[0]))
+
+'''
+#Uncomment these if you want to augment data to training data
+#idxs_concat = np.arange(img_raw.shape[0])[n_samples:]
+#idxs_train = np.concatenate((idxs_train,idxs_concat))
+
+with open(save_path + '/log.txt', 'a+') as f:
+    f.write("\nNo. of samples after data augmentation: " + str(img_raw.shape[0]))
+
+'''
+X_train = img_raw[idxs_train, :, :, :]
+y_train = count[idxs_train, :, :, :]
+
+X_test = np.concatenate((img_raw[idxs_test, :, :, :],img_augment),axis=0)
+y_test = np.concatenate((count[idxs_test,:,:,:],count_augment),axis=0)
 
 del img_augment
 del count_augment
+del flip_augment
+del rot_augment
+
 
 def save_hyper_param(idxs_train,idxs_test):
     hyper_param={}
@@ -201,6 +245,7 @@ def save_hyper_param(idxs_train,idxs_test):
     hyper_param['stride']=args.stride
     hyper_param['idxs_train']=idxs_train
     hyper_param['idxs_test']=idxs_test
+    hyper_param['flip_rot'] = flip_rot
     hyper_param['lr']=args.lr
     hyper_param['epochs']=args.epochs
     hyper_param['combine']=args.combine
@@ -210,7 +255,6 @@ def save_hyper_param(idxs_train,idxs_test):
         pickle.dump(hyper_param,f)
 
 if(args.combine):
-
     if(args.train_model):
         with open(save_path + '/log.txt', 'a+') as f:
             f.write("\n====================>")
@@ -218,19 +262,6 @@ if(args.combine):
             f.write("\nBatch Size: "+str(args.batch))
             f.write("\nLearning rate: "+str(args.lr))
             f.write("\nTraining combined model")
-
-        idx_shuffle = np.arange(n_samples)
-        np.random.shuffle(idx_shuffle)
-        n_test = int(n_samples * 0.06)
-        idxs_test = np.sort(idx_shuffle[:n_test])
-        idxs_concat = np.arange(img_raw.shape[0])[n_samples:]
-        idxs_train = np.sort(np.concatenate((idx_shuffle[n_test:],idxs_concat)))
-
-        X_train = img_raw[idxs_train, :, :, :]
-        y_train = count[idxs_train, :, :, :]
-
-        X_test = img_raw[idxs_test, :, :, :]
-        y_test = count[idxs_test,:,:,:]
 
         save_hyper_param(idxs_train,idxs_test)
         cc = cc_model_combine.cc_model(input_shape=input_shape, patch_size=args.patch_size, stride=args.stride, \
@@ -275,18 +306,12 @@ else:
             f.write("\nLearning rate: "+str(args.lr))
             f.write("\nTraining separate model")
 
-        idx_shuffle = np.arange(n_samples)
-        np.random.shuffle(idx_shuffle)
-        n_test = int(img_raw.shape[0] * 0.06)
-        idxs_test = np.sort(idx_shuffle[:n_test])
-        idxs_concat = np.arange(img_raw.shape[0])[n_samples:]
-        idxs_train = np.sort(np.concatenate((idx_shuffle[n_test:], idxs_concat)))
+        y_train = y_train[:, :, :, idx][:,:,:,None]
+        save_folder = args.folder + '/target_' + str(args.obj)
 
-        X_train = img_raw[idxs_train, :, :, :]
-        y_train = count[idxs_train, :, :, idx][:,:,:,None]
-
-        X_test = img_raw[idxs_test, :, :, :]
-        y_test = count[idxs_test, :, :, idx][:,:,:,None]
+        filename_x = save_folder + '/X_test.h5'
+        with h5py.File(filename_x,'w') as file_x:
+            file_x['data'] = X_test
 
         save_hyper_param(idxs_train,idxs_test)
 
@@ -300,6 +325,7 @@ else:
         cc.train_model(X_train=X_train, y_train=y_train, img_valid= img_valid,count_valid=count_valid,\
                        X_valid=X_test,y_valid=y_test,save_folder=args.folder + '/target_' + str(args.obj))
 
+
     if (args.test_model):
         with open(save_path + '/log.txt', 'a+') as f:
             f.write("\n====================>")
@@ -308,17 +334,18 @@ else:
                 f.write("\nFile not found! Exiting .....")
                 sys.exit(1)
 
-        with open(args.folder + '/target_'+str(args.obj)+"/hyper_param.pickle", 'rb') as f:
-            hyper_param = pickle.load(f)
+        save_folder = args.folder + '/target_' + str(args.obj)
+        filename_x = save_folder + '/X_test.h5'
+        if(not os.path.isfile(filename_x)):
+            raise Exception("Generate X_test file. X_test file not found")
 
-        patch_size = hyper_param['patch_size']
-        stride = hyper_param['stride']
-        idxs_train = hyper_param['idxs_train']
-        idxs_test = hyper_param['idxs_test']
-        X_test = img_raw[idxs_test, :, :, :]
+        with h5py.File(filename_x, 'r') as file_x:
 
-        cc_model.predict(X_test=X_test, save_folder=args.folder+'/target_'+str(args.obj))
+            X_test = file_x['data']
+            cc_model.predict(X_test=X_test, save_folder=args.folder+'/target_'+str(args.obj))
 
+        os.remove(filename_x)
+        #os.remove(filename_y)
 
 file_annotate.close()
 process_time = (time.time()-time_begin)/3600
