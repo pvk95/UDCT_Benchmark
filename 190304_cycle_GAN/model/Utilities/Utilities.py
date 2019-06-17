@@ -4,7 +4,7 @@ import h5py
 import os
 import sys
 sys.path.append('./model/')
-import results
+from getCounts import *
 
 def produce_tiled_images(im_A,im_B,fake_A,fake_B,cyc_A,cyc_B):
 
@@ -24,7 +24,7 @@ def visualize_train(im,gt,fake,path = None):
     assert len(im.shape) ==2 #Grayscale image
     assert len(gt.shape) ==2 #Only one channel expected and squeezed
     assert len(fake.shape) ==3 #All 3 channels expected
-    fake_gt, _ = results.get_location_dead(fake)
+    fake_gt, _ = get_location_dead(fake)
 
     assert len(fake_gt.shape) == 2 #Only one channel expected
 

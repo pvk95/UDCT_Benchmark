@@ -36,7 +36,7 @@ class Model:
     """
     
     def __init__(self,mod_name,data_file,valid_file,buffer_size=32,architecture='Res6',lambda_h=10.,lambda_c=10.,dis_noise=0.25,\
-                 deconv='transpose',attention=0,patchgan='Patch70',save_folder = 'Models/',verbose=False,gen_only=False):
+                 deconv='transpose',attention=0,patchgan='Patch70',save_folder = 'Models/',verbose=False,gen_only=False,data_file_B=None):
         """
         Create a Model (init). It will check, if a model with such a name has already been saved. If so, the model is being 
         loaded. Otherwise, a new model with this name will be created. It will only be saved, if the save function is being 
@@ -54,13 +54,19 @@ class Model:
         self.save_folder = save_folder
         self.data_file = data_file                              # hdf5 data file
         self.valid_file = valid_file                            # hdf5 validation file
+        self.data_file_B = data_file_B
 
         with h5py.File(self.data_file,"r") as f:
             self.a_chan = int(f['A/data'].shape[3])      # Number channels in A
-            self.b_chan = int(f['B/data'].shape[3])      # Number channels in B
-            self.imsize = int(f['A/data'].shape[1])      # Image size (square image)
-            self.a_size = int(f['A/data'].shape[0])      # Number of samples in A
-            self.b_size = int(f['B/data'].shape[0])      # Number of samples in B
+            self.imsize = int(f['A/data'].shape[1])  # Image size (square image)
+            self.a_size = int(f['A/data'].shape[0])  # Number of samples in A
+            if not data_file_B:
+                self.b_chan = int(f['B/data'].shape[3])  # Number channels in B
+                self.b_size = int(f['B/data'].shape[0])  # Number of samples in B
+            else:
+                with h5py.File(self.data_file_B,'r') as file_b:
+                    self.b_chan = int(file_b['B/data'].shape[3])      # Number channels in B
+                    self.b_size = int(file_b['B/data'].shape[0])      # Number of samples in B
                 
         # Reset all current saved tf stuff
         tf.reset_default_graph()
@@ -332,17 +338,12 @@ class Model:
         return [b_order,idx_end]
 
     
-    def train(self,batch_size=32,lambda_c=0.,lambda_h=0.,n_epochs=1,save=True,syn_noise=0.,real_noise=0.,num_samples = None,num_iterations = 400):
-
-        np.random.seed(0)
+    def train(self,batch_size=32,lambda_c=0.,lambda_h=0.,n_epochs=1,save=True,syn_noise=0.,real_noise=0.,num_samples = None):
 
         f = h5py.File(self.data_file, 'r')
         if not num_samples:
             raise ValueError("Value for number of samples not fed!")
 
-        with h5py.File(self.valid_file,'r') as valid_file:
-            im = np.array(valid_file['raw/data'][0,:,:,0])
-            gt = np.array(valid_file['gt_SI/data'][0,:,:,0])
 
         # Fix the number of iterations: As many as required for a single pass over the data
         # An epoch iterates is a multiple of such iterations
@@ -350,16 +351,8 @@ class Model:
         num_samples = min(self.a_size,self.b_size,num_samples)
         num_iterations = num_samples//batch_size
         a_order = np.random.permutation(self.a_size)[:num_samples]
+        b_order = np.random.permutation(self.b_size)[:num_samples] #Used for Apr_27/
 
-        '''
-        if num_samples<=50:
-            a_order = np.arange(num_samples)
-        else:
-            a_order = np.sort(np.concatenate((np.arange(50),np.random.choice(np.arange(50,self.a_size),\
-                                                                             size=num_samples-50,replace=False))))
-
-        b_order = np.arange(self.b_size)[:num_samples]
-        '''
 
         if num_samples<batch_size:
             batch_size = num_samples
@@ -379,15 +372,22 @@ class Model:
             self.init(sess)
 
             rel_lr = 1.
-            idx_start = 0
+            #idx_start = 0
             for curr_epoch in range(n_epochs):
                 
-                [b_order, idx_start] = self.get_b_order(num_samples, idx_start)
+                #[b_order, idx_start] = self.get_b_order(num_samples, idx_start)
+                #b_order = np.random.choice(np.arange(self.b_size),num_samples,replace=False)
                 np.random.shuffle(a_order)
                 np.random.shuffle(b_order)
 
                 if curr_epoch > 100:
                     rel_lr = 2. - curr_epoch/100.
+
+                if curr_epoch < 50:
+                    rel_noise = 0.9 ** curr_epoch
+                else:
+                    rel_noise = 0.
+
 
                 with open(self.save_folder + 'log.txt','a+') as log:
                     log.write("\n=====================\n")
@@ -413,13 +413,11 @@ class Model:
 
                 for iteration in range(num_iterations):
                     images_a   = f['A/data'][np.sort(a_order[(iteration*batch_size):((iteration+1)*batch_size)]),:,:,:]
-                    images_b   = f['B/data'][np.sort(b_order[(iteration*batch_size):((iteration+1)*batch_size)]),:,:,:]
-
-                    #images_a   = f['A/data'][np.sort(a_order[batch_start:batch_start+batch_size]),:,:,:]
-                    #images_b   = f['B/data'][np.sort(b_order[batch_start:batch_start+batch_size]),:,:,:]
-
-                    #images_a =   f['A/data'][np.sort(np.random.choice(a_order,size=batch_size,replace=False)),:,:,:]
-                    #images_b =   f['B/data'][np.sort(np.random.choice(b_order,size=batch_size,replace=False)),:,:,:]
+                    if not self.data_file_B:
+                        images_b   = f['B/data'][np.sort(b_order[(iteration*batch_size):((iteration+1)*batch_size)]),:,:,:]
+                    else:
+                        with h5py.File(self.data_file_B,'r') as file_b:
+                            images_b   = file_b['B/data'][np.sort(b_order[(iteration*batch_size):((iteration+1)*batch_size)]),:,:,:]
 
                     #Check whether images A and B are in correct format or not
                     if images_a.dtype=='uint8':
@@ -445,7 +443,7 @@ class Model:
 
                     if self.attention_flag:
                         feed_data = {self.A: images_a,self.B: images_b,self.lambda_c: lambda_c,self.lambda_h: lambda_h,\
-                                     self.relative_lr: rel_lr,self.rel_dis_noise: real_noise}
+                                     self.relative_lr: rel_lr,self.rel_dis_noise: rel_noise}
 
                         var_to_run = [self.opt_gen,self.loss_gen_A,self.fake_A,self.loss_gen_B,self.fake_B,\
                                       self.cyc_A,self.cyc_B,self.s_A,self.s_B,self.s_fake_A,self.s_fake_B,\
@@ -455,7 +453,7 @@ class Model:
                         attention_out, fakeB_pre_att,lcA,lcB = sess.run(var_to_run,feed_dict= feed_data)
                     else:
                         feed_data = {self.A: images_a,self.B: images_b,self.lambda_c: lambda_c,self.lambda_h: lambda_h,\
-                                     self.relative_lr: rel_lr,self.rel_dis_noise: real_noise}
+                                     self.relative_lr: rel_lr,self.rel_dis_noise: rel_noise}
 
                         var_to_run = [self.opt_gen,self.loss_gen_A,self.fake_A,self.loss_gen_B,self.fake_B,\
                                       self.cyc_A,self.cyc_B,self.s_A,self.s_B,self.s_fake_A,self.s_fake_B,\
@@ -499,7 +497,7 @@ class Model:
                                  self.dis_fake_A,self.dis_fake_Ah,self.dis_real_B,self.dis_real_Bh,self.dis_fake_B,self.dis_fake_Bh]
 
                     feed_data = {self.A: dis_real_a,self.B: dis_real_b,self.fake_A: dis_fake_a,self.fake_B: dis_fake_b,\
-                                 self.lambda_c: lambda_c,self.lambda_h: lambda_h,self.relative_lr: rel_lr,self.rel_dis_noise: real_noise}
+                                 self.lambda_c: lambda_c,self.lambda_h: lambda_h,self.relative_lr: rel_lr,self.rel_dis_noise: rel_noise}
 
                     _, l_dis_A, l_dis_B, \
                     ldrA,ldrAh,ldfA,ldfAh,\
@@ -569,6 +567,11 @@ class Model:
 
                 if (num_samples==1700):
                     # Visualize training every epoch
+
+                    with h5py.File(self.valid_file, 'r') as valid_file:
+                        im = np.array(valid_file['raw/data'][0, :, :, 0])
+                        gt = np.array(valid_file['gt_SI/data'][0, :, :, 0])
+
                     pred_im = sess.run(self.fake_B,feed_dict={self.A: im[None,:,:,None],self.lambda_c:lambda_c,\
                                                     self.lambda_h:lambda_h})
                     pred_im = np.squeeze(np.minimum(np.maximum(pred_im,0),1))
@@ -576,7 +579,7 @@ class Model:
                     Utilities.visualize_train(im,gt,pred_im,path = fig_save_path)
                 
                 # Save model every 5 epochs
-                if (save and (curr_epoch+1)%5==0):
+                if (save and (curr_epoch+1)%5==0 or curr_epoch == n_epochs-1):
                     self.save(sess)
         f.close()
 
@@ -643,7 +646,7 @@ class Model:
         with open(self.save_folder + 'log.txt', 'a+') as log:
             log.write("\nGenerated B for given data ...")
 
-        with h5py.File(self.save_folder + self.mod_name + 'data_gen_B.h5', "w") as f_save:
+        with h5py.File(self.save_folder + self.mod_name + '_gen_B.h5', "w") as f_save:
             group = f_save.create_group('B')
             group.create_dataset(name='data', data=gen_data, dtype=np.uint16)
 
@@ -711,22 +714,31 @@ class Model:
         f.close()
         
         return None
-    
-    def generator_B(self,batch_size=32,lambda_c=0.,lambda_h=0.):
+
+    def generator_B(self,batch_size=32,lambda_c=0.,lambda_h=0.,checkpoint_path=None):
         f = h5py.File(self.data_file,"r")
         f_save = h5py.File(self.save_folder + self.mod_name + '_gen_B.h5',"w")
-        
+
         # Find number of samples
         num_samples    = self.a_size
-        num_iterations = num_samples // batch_size
-                
-        gen_data       = np.zeros((f['A/data'].shape[0],f['A/data'].shape[1],f['A/data'].shape[2],f['B/data'].shape[3]),dtype=np.uint16)
-        
+        if num_samples%batch_size==0:
+            num_iterations = num_samples // batch_size
+        else:
+            num_iterations = num_samples//batch_size + 1
+
+        gen_data       = np.zeros((f['A/data'].shape[0],f['A/data'].shape[1],f['A/data'].shape[2],self.b_chan),dtype=np.uint16)
+
         with tf.Session(graph=self.graph) as sess:
             # initialize variables
-            self.init(sess)
-            
-            for iteration in range(num_iterations):    
+            if not checkpoint_path:
+                self.init(sess)
+            else:
+                if not os.path.isfile(checkpoint_path + self.mod_name + ".ckpt.meta"):
+                    print("Checkpoint not found. Exiting")
+                    sys.exit(1)
+                self.saver.restore(sess, checkpoint_path + self.mod_name + ".ckpt")
+
+            for iteration in range(num_iterations):
                 images_a   = f['A/data'][(iteration*batch_size):((iteration+1)*batch_size),:,:,:]
                 if images_a.dtype=='uint8':
                     images_a=images_a/float(2**8-1)
@@ -742,16 +754,15 @@ class Model:
 
                 with open(self.save_folder + 'log.txt','a+') as log:
                     log.write("\nGenerator B: {}/{} ({:.1f}%)".format(iteration+1, num_iterations, iteration*100/(num_iterations-1)))
-        
+
         group = f_save.create_group('B')
         group.create_dataset(name='data', data=gen_data,dtype=np.uint16)
-        
+
         f_save.close()
         f.close()
-        
+
         return None
-        
-    
+
     def get_loss(self,lambda_c=0.,lambda_h=0.):
         f = h5py.File(self.data_file,"r")
         
