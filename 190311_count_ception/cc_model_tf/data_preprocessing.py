@@ -129,6 +129,8 @@ def data_augment(filename_count,filename_data,total_samples=200):
 
     #Set the seed for consistency
 
+    print('Hi')
+
     np.random.seed(0)
     file_annotate = h5py.File('Neuron_annotated_dataset.h5','r')
     img_raw=file_annotate['raw']['data']
@@ -188,6 +190,8 @@ def data_augment(filename_count,filename_data,total_samples=200):
     img_raw=np.concatenate((img_raw,img_augment),axis=0)
     count = np.concatenate((count,count_augment),axis=0)
 
+    print(count.shape)
+
     with h5py.File(filename_data,'w') as f:
         f['raw'] = img_raw
         f['count'] = count
@@ -195,4 +199,4 @@ def data_augment(filename_count,filename_data,total_samples=200):
         f['flip_rot'] = flip_rot
 
 if __name__ == 'main':
-    data_augment(filename_count='count_maps_32_1',filename_data='dataset_32_1.h5',total_samples=250)
+    data_augment(filename_count='count_maps_64_1.h5',filename_data='dataset_64_trial.h5',total_samples=250)

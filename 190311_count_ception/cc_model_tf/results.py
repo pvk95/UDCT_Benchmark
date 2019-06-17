@@ -204,6 +204,8 @@ def getResults(save_folder):
             save_path=save_folder + 'target_1'
             file_predictions_1 = h5py.File(save_path + '/predictions.h5', 'r')
             y_pred = file_predictions_1['predictions'][()]
+            if len(y_pred.shape)==3:
+                y_pred = y_pred[:,:,:,None]
             results_run = getSummary(y_pred,save_path, 5, 0,'count_maps_32_1')
             print("Analysis for target 1 complete")
         elif os.path.exists(save_folder+'target_2'):
@@ -225,7 +227,6 @@ if __name__=='__main__':
     save_folder = './Apr_15/'
     save_folder = sys.argv[1]
     dict = getResults(save_folder)
-    print(dict)
 
 '''
 import tensorflow as tf
