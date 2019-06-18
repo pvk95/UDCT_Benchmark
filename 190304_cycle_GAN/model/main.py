@@ -3,9 +3,7 @@ import re
 import sys
 from os import environ as cuda_environment
 import os
-import numpy as np
 import time
-import h5py
 
 if __name__ == "__main__":
 	time_begin = time.time()
@@ -19,8 +17,9 @@ if __name__ == "__main__":
 	
 	# List of ints
 	sub_value_i = {}
+	sub_value_i['ckpt_path']   = 0				 # If True then checkpoint for color data is loaded
+	sub_value_i['data_B'] = 0				 # If True then the simulated data is read from specified location
 	sub_value_i['epoch']       = 200             # Number of epochs to be trained
-	sub_value_i['num_iterations']  = 400		 # Number of iterations of gradient upfdate for every epoch (irrespective of batch size)
 	sub_value_i['cont_train']  = 0               # If not 0, the training is continued from the epoch that was last saved
 	sub_value_i['batch_size']  = 5               # Batch size for training
 	sub_value_i['buffer_size'] = 50              # Number of history elements used for Dis
@@ -29,17 +28,19 @@ if __name__ == "__main__":
 	sub_value_i['attention']   = 0               # If not 0, add an attention layer in path: Real -> Fake -> Real
 	sub_value_i['verbose']     = 0               # If not 0, some network information is being plotted
 	sub_value_i['num_samples'] = 1500			 # Num of samples to train the model
+			     
 	
 	# List of strings
 	sub_string = {}
-	sub_string['name']         = 'CGAN'       # Name of model (should be unique). Is used to save/load models
+	sub_string['name']         = 'CGAN'       	 # Name of model (should be unique). Is used to save/load models
 	sub_string['dataset']      = 'dataset_neuron.h5'      # ATM: 'nanowire' or 'mitochondria'
+	sub_string['data_file_B']  = 'dataset_B.h5'  # Location of separate file containing B data
 	sub_string['architecture'] = 'Res6'          # Network architecture: 'Res6' or 'Res9'
 	sub_string['deconv']       = 'transpose'     # Upsampling method: 'transpose' or 'resize'
 	sub_string['PatchGAN']     = 'Patch70'       # Choose the Gan type: 'Patch34', 'Patch70', 'Patch142', 'MultiPatch'
 	sub_string['mode']         = 'training'      # 'train', 'gen_A', 'gen_B', 'grad_test'
-	sub_string['valid_file']    = '../cc/Neuron_annotated_dataset.h5' # Data containing annotated data for predictions
-    
+	sub_string['valid_file']    = '/home/karthikp/cc/Neuron_annotated_dataset.h5' # Data containing annotated data for predictions
+
 	# Create complete dictonary
 	var_dict  = sub_string.copy()
 	var_dict.update(sub_value_i)
@@ -50,9 +51,14 @@ if __name__ == "__main__":
 	save_folder = save_folder + '/'
 	if not os.path.exists(save_folder):
 		os.makedirs(save_folder)
-		with open(save_folder + 'log.txt','w') as log:
+		with open(save_folder + 'log.txt','a+') as log:
 			log.write("{} folder created\n".format(save_folder))
 
+	if not not var_dict['ckpt_path']:
+		ckpt_path = None
+	else:
+		ckpt_path = '/home/karthikp/cycgan/190304_cycle_GAN/color_ckpt/'
+		#ckpt_path ='./color_ckpt/'
 
 	# Update all defined parameters in dictionary
 	for arg_i in sys.argv[2:]:
@@ -79,6 +85,12 @@ if __name__ == "__main__":
 			var_dict[g_var] = float(g_content)
 		else:
 			var_dict[g_var] = g_content
+
+	if not var_dict['data_B']:
+		data_file_B = None
+	else:
+		data_file_B = var_dict['data_file_B']
+
 	if not os.path.isfile(var_dict['dataset']):
 		raise ValueError('Dataset does not exist. Specify loation of an existing h5 file.')
 
@@ -87,7 +99,8 @@ if __name__ == "__main__":
 	os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 	# Get the dataset filename
-	with open(save_folder+var_dict['name']+"_params.txt", "w") as myfile:
+	with open(save_folder+var_dict['name']+"_params.txt", "a+") as myfile:
+		myfile.write('\n\n')
 		for key in sorted(var_dict):
 			myfile.write(key + "," + str(var_dict[key]) + "\n")
 	
@@ -103,40 +116,42 @@ if __name__ == "__main__":
 		valid_file=var_dict['valid_file'],\
 		buffer_size=var_dict['buffer_size'],\
 		dis_noise=var_dict['dis_noise'],\
-        architecture=var_dict['architecture'],\
+		architecture=var_dict['architecture'],\
 		save_folder = save_folder,\
-        lambda_c=var_dict['lambda_c'],\
-        lambda_h=var_dict['lambda_h'],\
-        deconv=var_dict['deconv'],\
-        attention=var_dict['attention'],\
-        patchgan=var_dict['PatchGAN'],\
-        verbose=(var_dict['verbose']!=0),\
-        gen_only=gen_only)
+		lambda_c=var_dict['lambda_c'],\
+		lambda_h=var_dict['lambda_h'],\
+		deconv=var_dict['deconv'],\
+		attention=var_dict['attention'],\
+		patchgan=var_dict['PatchGAN'],\
+		verbose=(var_dict['verbose']!=0),\
+		gen_only=gen_only,\
+		data_file_B=data_file_B)
 
 	# Plot parameter properties, if applicable
 	if var_dict['verbose']:
 		# Print the number of parameters
 		model.print_count_variables()
 		model.print_train_and_not_train_variables()
-    	
+
 	# Create a graph file
 	model.save_graph()
 	
 	if var_dict['mode'] == 'grad_test':
 		# Test gradients if applicable
 		model.print_gradients()
-        
+
 	elif var_dict['mode'] == 'training':
 		# Train the model
 		model.train(batch_size=var_dict['batch_size'],lambda_c=var_dict['lambda_c'],lambda_h=var_dict['lambda_h'],\
 					save=bool(var_dict['save']),n_epochs=var_dict['epoch'],syn_noise=var_dict['syn_noise'],\
-					real_noise=var_dict['real_noise'],num_samples=var_dict['num_samples'],num_iterations=var_dict['num_iterations'])
-            
+					real_noise=var_dict['real_noise'],num_samples=var_dict['num_samples'])
+
 	elif var_dict['mode'] == 'gen_A':
 		model.generator_A(batch_size=var_dict['batch_size'],lambda_c=var_dict['lambda_c'],lambda_h=var_dict['lambda_h'])
-        
+
 	elif var_dict['mode'] == 'gen_B':
-		model.generator_B(batch_size=var_dict['batch_size'],lambda_c=var_dict['lambda_c'],lambda_h=var_dict['lambda_h'])
+		model.generator_B(batch_size=var_dict['batch_size'],lambda_c=var_dict['lambda_c'],\
+						  lambda_h=var_dict['lambda_h'],checkpoint_path=ckpt_path)
 
 	elif var_dict['mode'] == 'data_gen_B':
 		pred_data = var_dict['valid_file']
@@ -147,56 +162,3 @@ if __name__ == "__main__":
 	proc_dur = (time.time() - time_begin)/3600
 	with open(save_folder + 'log.txt','a+') as log:
 		log.write("\nTotal duration: {:.2f}\n".format(proc_dur))
-
-'''
-import h5py
-import numpy as np
-
-data_file = h5py.File('new_dataset_neuron.h5','r')
-images_a = data_file['A/data']
-
-images_a.shape
-images_a.dtype
-
-images_ann = images_a[:50,:,:,:]
-
-np.max(images_ann)
-images_ann.dtype
-
-np.max(images_a)
-np.min(images_a)
-
-images_b = data_file['B/data']
-
-images_b.shape
-images_b.dtype
-
-np.max(images_b)
-np.min(images_b)
-
-pred_file = h5py.File('../190311_count_ception/Neuron_annotated_dataset.h5','r')
-#pred_file = h5py.File('../190311_count_ception/Neuron_annotated_dataset.h5', 'r')
-images_ann = pred_file['raw/data'][:50,:,:,:]
-
-images_ann.shape
-images_ann.dtype
-np.max(images_ann)
-np.min(images_ann)
-
-images_ann = (np.minimum(np.maximum(images_ann, 0), 1) * (2 ** 16 - 1)).astype(np.uint16)
-
-images_ann.shape
-np.max(images_ann)
-images_new = np.concatenate((images_ann,images_a),axis=0)
-
-data_file_new = h5py.File(newFileName,'w')
-group = data_file_new.create_group('A')
-group.create_dataset(name='data', data=images_new, dtype=np.uint16)
-group = data_file_new.create_group('B')
-group.create_dataset(name='data', data=data_file['B/data'], dtype=np.uint16)
-
-data_file_new.close()
-pred_file.close()
-data_file.close()
-
-'''
