@@ -116,11 +116,8 @@ if __name__ =='__main__':
     gpu = sys.argv[3]
 
     if not os.path.isfile(run_folder + 'CGAN_gen_B.h5'):
-        if os.path.isfile(run_folder + 'CGANdata_gen_B.h5'):
-            os.system('mv {}CGANdata_gen_B.h5 {}CGAN_gen_B.h5'.format(run_folder,run_folder))
-        else:
-            os.system('python model/main.py save_folder={} valid_file={} mode=data_gen_B gpu={}'.format(run_folder,
-                                                                                                       fileName_data,gpu))
+        os.system('python model/main.py save_folder={} valid_file={} mode=data_gen_B gpu={}'.format(run_folder,\
+                                                                                                    fileName_data,gpu))
 
     file_pred = h5py.File(run_folder + 'CGAN_gen_B.h5', 'r')
     gen_B = file_pred['B/data'][()]
@@ -138,6 +135,7 @@ if __name__ =='__main__':
         gen_B = np.array(gen_B) / (2 ** 16 - 1)
 
     #TO DO:
+    #order = [2,1,0]
     order = [0,1,2]
 
     #if not os.path.exists(run_folder + 'gt_pred.pkl'):
