@@ -293,3 +293,114 @@ if __name__=='main':
             epochs_lr[i] = epochs_lr[i - 1] * np.exp(-k)
 
     plt.plot(epochs,epochs_lr)
+
+'''
+#Following version: When the network is updated for every batch.
+
+    def train_model(self, X_train, y_train, img_valid,count_valid,X_valid,y_valid,save_folder="cc_model_results"):
+
+        tf.set_random_seed(0)
+        np.random.seed(0)
+
+        config = tf.ConfigProto()
+        config.gpu_options.allow_growth = True  # dynamically grow the memory used on the GPU
+        sess = tf.Session(config=config)
+        set_session(sess)  # set this TensorFlow session as the default session for Keras
+
+        img_valid = img_valid[None, :, :, :]
+
+        n_samples = X_train.shape[0]
+
+        train_val = []
+        test_val=[]
+        norm_val=[0]
+        train_curves = {}
+
+        count_comp=0
+
+        epochs_lr = [self.lr] * self.epochs
+
+        decay_rate = 4 * np.log(2) / (self.epochs / 5)
+
+        for i in range(1, self.epochs):
+            if (i < 3 * int(self.epochs / 5)):
+                epochs_lr[i] = self.lr
+            else:
+                epochs_lr[i] = epochs_lr[i - 1] * np.exp(-decay_rate)
+
+        # Create a checkpoint folder if not existent
+        if not os.path.exists(save_folder + '/checkpoint'):
+            os.makedirs(save_folder + '/checkpoint')
+        checkpoint_path = save_folder + "/checkpoint/cc_model.ckpt"
+
+        epoch_val = []
+
+        model = self.model
+        if n_samples<self.batch_sz:
+            batch_sz = n_samples
+        else:
+            batch_sz = self.batch_sz
+
+        for i in range(self.epochs):
+
+            current_lr = epochs_lr[i]
+            K.set_value(model.optimizer.lr, current_lr)
+
+            idxs = np.random.choice(np.arange(n_samples),size = batch_sz,replace = False)
+            xtr = X_train[idxs,:,:,:]
+            ytr = y_train[idxs, :, :, :]
+
+            mae_loss = model.train_on_batch(xtr,ytr)
+            epoch_val.append(mae_loss)
+
+            if((i+1)%self.epochs%30==0 or i==self.epochs-1):
+
+
+                #img_predict = model.predict(img_valid)
+                #self.visualize_train(img=img_valid, lab=count_valid, pcount=img_predict, save_folder=save_folder,idx=count_comp)
+
+                #count_comp = count_comp + 1
+
+                train_val.append(np.mean(epoch_val))
+                epoch_val = []
+
+                y_pred = model.predict(X_valid,batch_size = 16)
+                test_val_epoch = np.mean(np.abs(y_valid-y_pred))
+                test_val.append(test_val_epoch)
+
+                with open(save_folder + '/log.txt', 'a+') as f:
+                    f.write("\nEpoch {}/{}".format((i + 1), self.epochs))
+                    f.write("\nSmoothed mean loss: {}".format(train_val[-1]))
+                    f.write("\nTest loss: {}".format(test_val[-1]))
+
+                train_curves['train_val'] = np.array(train_val)
+                train_curves['test_val'] = np.array(test_val)
+                train_curves['grad_norm'] = np.array(norm_val)
+
+                with open(save_folder + "/train_curves.pickle", 'wb') as f:
+                    pickle.dump(train_curves,f)
+
+                #Save model after every 10th epoch and make predictions
+                if((i+1)%300==0 or i==self.epochs-1):
+                    tf.keras.models.save_model(model,save_folder+'/checkpoint/cc_model.h5')
+                    with open(save_folder + '/log.txt', 'a+') as f:
+                        f.write("\nModel saved in: {}".format(save_folder))
+
+                #Save test predictions every 100 epochs
+                if((i+1)%3000==0 or i==self.epochs-1):
+
+                    file_predict = save_folder + '/predictions.h5'
+                    f = h5py.File(file_predict, 'w')
+                    f['predictions'] = y_pred
+                    f.close()
+                    with open(save_folder + '/log.txt', 'a+') as f:
+                        f.write("\nPredictions saved in: {}".format(save_folder))
+
+                #Save train predictions every 250 epochs
+                if ((i+1)%7500==0 or i==self.epochs-1):
+                    if not os.path.exists(save_folder + '/train'):
+                        os.makedirs(save_folder + '/train')
+                    feed_train_valid = {self.main_input: X_train}
+                    y_pred_train = model.predict(X_train,batch_size = 16)
+                    np.save(save_folder + '/train/train_predictions', y_pred_train)
+'''
